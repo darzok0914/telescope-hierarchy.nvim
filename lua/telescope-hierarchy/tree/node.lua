@@ -8,19 +8,15 @@ local Path = require("plenary.path")
 local function get_bufnr_from_uri(uri)
   local filename = vim.uri_to_fname(uri)
   filename = Path:new(filename):normalize(vim.uv.cwd())
-
   pcall(function()
     vim.cmd(string.format("bufadd %s", vim.fn.fnameescape(filename)))
   end)
-
   local bufnr = vim.fn.bufnr(vim.fn.fnameescape(filename), true)
-
   vim.fn.bufload(bufnr)
-
   return bufnr
 end
 
---- Return the buffer assiciated to a URI if the buffer exists, creates it otherwise
+--- Return the calling function name and position
 ---@param location table The position from where we want to find the caller
 ---@return table | nil The name of the caller and its position
 local function get_outer_function_info_from_c_file(location)
@@ -82,7 +78,8 @@ local function get_outer_function_info_from_c_file(location)
   return nil
 end
 
---- Return the buffer assiciated to a URI if the buffer exists, creates it otherwise
+--- Return the references assiciated to the symbol
+---@sync
 ---@param symbol_info table The position of the symbol we want to search
 ---@param client table The lsp client
 ---@return table | nil The references found
