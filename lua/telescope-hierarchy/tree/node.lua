@@ -206,11 +206,18 @@ function Node:search(callback)
 
     -- Clangd has a known bug/limitation where a 'call Hierarchy incoming call' can't find the correct file when similar functions are implemented in different files
     -- Emperically, (tested on clangd 20.1.8 and clangd 21.1.0, aka the first versions to release lsp outgoing call),
-    -- we know the server returned the wrong file when the field "range" from the server response is empty.
+    -- we know the server returned the wrong file when the field "fromRange" from the server response is empty.
     -- We find the correct location via a call to lsp textDocument/references instead (as this seems to consistently returns the correct references)
     -- and use treesitter to get the name and position of its caller
+    -- The bug occurs as well on call hierarchy outgoing calls, however if 'fromRrange' is empty we don't create any node
     local client, _ = assert(lsp.get_state())
-    if client.name == "clangd" and #call.fromRanges == 0 and inner.name ~= "" and uri ~= "" then
+    if
+      direction:is_incoming()
+      and client.name == "clangd"
+      and #call.fromRanges == 0
+      and inner.name ~= ""
+      and uri ~= ""
+    then
       local parent_node_symbol_info = {
         location = {
           position = {
@@ -463,7 +470,7 @@ local function add_node_to_list(list, node, tree_state)
   if node.expanded and #node.children > 0 then
     local direction = assert(state.direction())
     if not direction:is_incoming() then
-        node.children = quicksort_nodes(node.children)
+      node.children = quicksort_nodes(node.children)
     end
     for idx, child in ipairs(node.children) do
       local last_child = idx == #node.children
