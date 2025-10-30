@@ -420,6 +420,31 @@ function Node:switch_direction(callback)
   new_root:search(callback)
 end
 
+---@param arr Node[] The array of nodes to sort
+---@return Node[] The sorted array
+local function quicksort_nodes(arr)
+  if #arr <= 1 then
+    return arr
+  end
+
+  local pivot = arr[1]
+  local left = {}
+  local right = {}
+
+  for i = 2, #arr do
+    if arr[i].lnum < pivot.lnum then
+      table.insert(left, arr[i])
+    else
+      table.insert(right, arr[i])
+    end
+  end
+
+  local sorted_left = quicksort_nodes(left)
+  local sorted_right = quicksort_nodes(right)
+
+  return vim.iter({ sorted_left, { pivot }, sorted_right }):flatten():totable()
+end
+
 ---@alias NodeLevel {node: Node, tree_state: boolean[]}
 ---@alias NodeList NodeLevel[]
 
@@ -436,6 +461,10 @@ local function add_node_to_list(list, node, tree_state)
   }
   table.insert(list, entry)
   if node.expanded and #node.children > 0 then
+    local direction = assert(state.direction())
+    if not direction:is_incoming() then
+        node.children = quicksort_nodes(node.children)
+    end
     for idx, child in ipairs(node.children) do
       local last_child = idx == #node.children
       local new_state = { unpack(tree_state) }
