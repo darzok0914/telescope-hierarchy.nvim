@@ -1,4 +1,5 @@
 local state = require("telescope-hierarchy.state")
+local Path = require("plenary.path")
 
 --- Holds reference to a function location in the codebase that represents
 --- a part of the call hierarchy
@@ -41,31 +42,6 @@ function Node.new(uri, text, lnum, col, cache)
   node.root = node
   setmetatable(node, Node)
   return node
-end
-
----@param arr Node[] The array of nodes to sort
----@return Node[] The sorted array
-local function quicksort_nodes(arr)
-  if #arr <= 1 then
-    return arr
-  end
-
-  local pivot = arr[1]
-  local left = {}
-  local right = {}
-
-  for i = 2, #arr do
-    if arr[i].lnum < pivot.lnum then
-      table.insert(left, arr[i])
-    else
-      table.insert(right, arr[i])
-    end
-  end
-
-  local sorted_left = quicksort_nodes(left)
-  local sorted_right = quicksort_nodes(right)
-
-  return vim.iter({ sorted_left, { pivot }, sorted_right }):flatten():totable()
 end
 
 ---Work out if a cache entry is recursive, given a parent
@@ -124,7 +100,6 @@ end
 function Node:search(callback)
   assert(self.cache.searched == "No")
   local direction = assert(state.direction())
-  local added_child = false
 
   ---@param call lsp.CallHierarchyIncomingCall | lsp.CallHierarchyOutgoingCall
   ---@param entry CacheEntry
@@ -147,7 +122,6 @@ function Node:search(callback)
         self:new_child(uri, inner.name, range.start.line + 1, range.start.character, entry)
         last_line = range.start.line
         last_char = range.start.character
-        added_child = true
       end
     end
   end
@@ -158,9 +132,6 @@ function Node:search(callback)
   ---trigger the refresh part of the callback
   ---@param pending boolean | nil
   local final_cb = function(pending)
-    if added_child and not direction:is_incoming() then
-      self.children = quicksort_nodes(self.children)
-    end
     if not pending then
       self.expanded = true
       self.cache.searched_node = self
@@ -199,10 +170,6 @@ function Node:expand(callback, force_cb)
         cloned.parent = self
         cloned.recursive = is_recursive(cloned.cache, self)
         table.insert(self.children, cloned)
-      end
-      local direction = assert(state.direction())
-      if #searched.children > 0 and not direction:is_incoming() then
-        self.children = quicksort_nodes(self.children)
       end
     end
 
@@ -316,6 +283,45 @@ function Node:switch_direction(callback)
   new_root:search(callback)
 end
 
+---@param arr Node[] The array of nodes to sort
+---@param filepath_active_buffer string The filepath of the buffer that was active before calling the plugin
+---@return Node[] The sorted array
+local function quicksort_nodes(filepath_active_buffer, arr)
+  if #arr <= 1 then
+    return arr
+  end
+
+  ---@param node Node The node to encode
+  local encode_node = function(node)
+    -- Little trick; we prefer having the results concerning our current file at the top, since it's visually closer
+    -- to the root node. As node.filename represents the uri, the string is likely (but not 100% certain) to be much longer
+    -- than any other relative path. We format the line number with 5 digits to make sure /my/file.c49 doesn't come after /my/file.c100
+    -- since we do a lexical comparision '4' < '1' == false
+    if node.filename == filepath_active_buffer then
+      return node.filename .. string.format("%05d", node.lnum)
+    else
+      return Path:new(node.filename):normalize(vim.uv.cwd()) .. string.format("%05d", node.lnum)
+    end
+  end
+
+  local pivot = arr[1]
+  local left = {}
+  local right = {}
+
+  for i = 2, #arr do
+    if encode_node(arr[i]) < encode_node(pivot) then
+      table.insert(left, arr[i])
+    else
+      table.insert(right, arr[i])
+    end
+  end
+
+  local sorted_left = quicksort_nodes(filepath_active_buffer, left)
+  local sorted_right = quicksort_nodes(filepath_active_buffer, right)
+
+  return vim.iter({ sorted_left, { pivot }, sorted_right }):flatten():totable()
+end
+
 ---@alias NodeLevel {node: Node, tree_state: boolean[]}
 ---@alias NodeList NodeLevel[]
 
@@ -325,18 +331,19 @@ end
 ---@param list NodeList The list being built up
 ---@param node Node
 ---@param tree_state boolean[] A list of true/false flags that, for each level in indicate whether this is the last node. This information is needed for rendering the tree in the Telescope finder
-local function add_node_to_list(list, node, tree_state)
+local function add_node_to_list(filepath_active_buffer, list, node, tree_state)
   local entry = {
     node = node,
     tree_state = tree_state,
   }
   table.insert(list, entry)
   if node.expanded and #node.children > 0 then
+    node.children = quicksort_nodes(filepath_active_buffer, node.children)
     for idx, child in ipairs(node.children) do
       local last_child = idx == #node.children
       local new_state = { unpack(tree_state) }
       table.insert(new_state, last_child)
-      add_node_to_list(list, child, new_state)
+      add_node_to_list(filepath_active_buffer, list, child, new_state)
     end
   end
 end
@@ -350,7 +357,7 @@ function Node:to_list(from_root)
   ---@type NodeList
   local results = {}
   local render_root = (from_root == nil or from_root) and self.root or self
-  add_node_to_list(results, render_root, {})
+  add_node_to_list(self.root.filename, results, render_root, {})
   return results
 end
 
