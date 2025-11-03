@@ -44,44 +44,6 @@ function Node.new(uri, text, lnum, col, cache)
   return node
 end
 
----@param arr Node[] The array of nodes to sort
----@return Node[] The sorted array
-function Node:quicksort_nodes(arr)
-  if #arr <= 1 then
-    return arr
-  end
-
-  ---@param node Node The node to encode
-  local encode_node = function(node)
-    -- Little trick; we prefer having the results concerning our current file at the top, since it's visually closer
-    -- to the root node. We format the line number with 5 digits to make sure /my/file.c49 doesn't come after /my/file.c100
-    -- since we do a lexical comparision '4' < '1' == false
-    if node.filename == self.root.filename then
-      return string.format("%05d", node.lnum)
-    else
-      return Path:new(node.filename):normalize(vim.uv.cwd()) .. string.format("%05d", node.lnum)
-    end
-  end
-
-  local pivot = arr[1]
-  local encoded_pivot = encode_node(pivot)
-  local left = {}
-  local right = {}
-
-  for i = 2, #arr do
-    if encode_node(arr[i]) < encoded_pivot then
-      table.insert(left, arr[i])
-    else
-      table.insert(right, arr[i])
-    end
-  end
-
-  local sorted_left = self:quicksort_nodes(left)
-  local sorted_right = self:quicksort_nodes(right)
-
-  return vim.iter({ sorted_left, { pivot }, sorted_right }):flatten():totable()
-end
-
 ---Work out if a cache entry is recursive, given a parent
 ---Will recursively call this function going up the parent chain until
 ---either a cache match is found or we reach the root (which has a nil
@@ -131,6 +93,29 @@ function Node:clone()
   return clone
 end
 
+---Sort the children of the current node
+function Node:sort_children()
+  ---A comparsion function to compare any two nodes, such that we can sort them
+  ---@param a Node
+  ---@param b Node
+  ---@return boolean
+  local function cmp(a, b)
+    ---@param node Node The node to encode
+    local encode_node = function(node)
+      -- Little trick; we prefer having the results concerning our current file at the top, since it's visually closer
+      -- to the root node. We format the line number with 5 digits to make sure /my/file.c49 doesn't come after /my/file.c100
+      -- since we do a lexical comparision '4' < '1' == false
+      if node.filename == self.root.filename then
+        return string.format("%05d", node.lnum)
+      else
+        return Path:new(node.filename):normalize(vim.uv.cwd()) .. string.format("%05d", node.lnum)
+      end
+    end
+    return encode_node(a) < encode_node(b)
+  end
+
+  table.sort(self.children, cmp)
+end
 ---Search the current node
 ---It will do nothing if the current node has already been searched
 ---@async
@@ -178,7 +163,7 @@ function Node:search(callback)
     end
     --Make sure the children are stored sorted
     if child_added then
-      self.children = self:quicksort_nodes(self.children)
+      self:sort_children()
     end
     callback(self, pending)
   end
