@@ -122,7 +122,7 @@ local function gen_make_entry(opts)
       prefix_len = prefix_len + strings.strdisplaywidth(str)
     end
 
-    local suffix_len = 5 -- a ":", and space for 4 digits for lnum
+    local suffix_len = 1 -- 5 -- a ":", and space for 4 digits for lnum
     local available = width - prefix_len - suffix_len
 
     local truncated = strings.truncate(filename, available, "…", -1)
@@ -166,10 +166,9 @@ local function gen_make_entry(opts)
     position = add_part(results, highlights, position, make_suffix(node), "TelescopeResultsComment")
     position = add_part(results, highlights, position, "     ", "")
 
-    local formatted_fname = padded_filename(width, results, Path:new(entry.filename):normalize(vim.uv.cwd()))
-    position = add_part(results, highlights, position, formatted_fname, "TelescopeResultsLineNr")
-    position = add_part(results, highlights, position, ":", "TelescopeResultsMethod")
-    _ = add_part(results, highlights, position, entry.lnum, "TelescopeResultsLineNr")
+    local formatted_fname = Path:new(entry.filename):normalize(vim.uv.cwd()) .. ":" .. entry.lnum .. ":" .. entry.col
+    formatted_fname = padded_filename(width, results, formatted_fname)
+    _ = add_part(results, highlights, position, formatted_fname, "TelescopeResultsLineNr")
 
     local final_str = table.concat(results, "")
     return final_str, highlights
