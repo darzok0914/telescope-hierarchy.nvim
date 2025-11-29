@@ -42,11 +42,12 @@ local function get_outer_function_info_from_c_file(location)
     -- We go up the tree until we find the node corresponding to the function definition
     -- find("function_definition") will find anything that contains the string "function_definition"
     -- so it will also work (maybe more robust?) if we used find("function")
-    if node_at_location:type():find("function_definition") or node_at_location:type():find("declaration") then
+    if node_at_location:type():find("function_definition") then
       -- now that we found the "function definition" node, we need to parse its sub node to find
       -- the node function_declarator
       for child, _ in node_at_location:iter_children() do
-        if child:type():find("function_declarator") or child:type():find("init_declarator") then
+        if child:type():find("function_declarator") then
+            -- print("function_definition found " .. vim.treesitter.get_node_text(child, bufnr))
           -- and now we want to isolate the node corresponding to the function name
           for sub_child, _ in child:iter_children() do
             local node_type = sub_child:type()
@@ -74,6 +75,55 @@ local function get_outer_function_info_from_c_file(location)
     end
     node_at_location = node_at_location:parent()
   end
+
+  -- if we haven't found in the first iteration then we are probably not in a function
+  node_at_location = root:named_descendant_for_range(start_line, start_char, end_line, end_char)
+  print("we go here")
+  while node_at_location do
+    -- We go up the tree until we find the node corresponding to the function definition
+    -- find("function_definition") will find anything that contains the string "function_definition"
+    -- so it will also work (maybe more robust?) if we used find("function")
+    if node_at_location:type():find("declaration") then
+      -- now that we found the "function definition" node, we need to parse its sub node to find
+      -- the node function_declarator
+      print("we go here: declaration")
+      for child, _ in node_at_location:iter_children() do
+        if child:type():find("init_declarator") then
+            print("we go here: init_declarator")
+            -- print("function_definition found " .. vim.treesitter.get_node_text(child, bufnr))
+          -- and now we want to isolate the node corresponding to the function name
+          for sub_child, _ in child:iter_children() do
+            local node_type = sub_child:type()
+            if
+              node_type:match("identifier")
+              or node_type:match("func")
+              or node_type:match("function")
+              or node_type:match("method")
+              or node_type:match("declaration")
+              or node_type:match("array_declarator")
+            then
+                print("we go here: array_declarator")
+              local function_name = vim.treesitter.get_node_text(sub_child, bufnr)
+              print("function_name:" .. function_name)
+              local line, col, _, _ = sub_child:range()
+              print("line, col:" .. line .. ':' .. col)
+              return {
+                function_name = function_name,
+                position = {
+                  line = line,
+                  character = col,
+                },
+              }
+            end
+          end
+        end
+      end
+      break
+    end
+    node_at_location = node_at_location:parent()
+  end
+
+
 
   return nil
 end
@@ -214,7 +264,7 @@ function Node:search(callback)
     if
       direction:is_incoming()
       and client.name == "clangd"
-      and #call.fromRanges == 0
+      -- and #call.fromRanges == 0
       and inner.name ~= ""
       and uri ~= ""
     then
@@ -235,7 +285,11 @@ function Node:search(callback)
       if references then
         for _, ref in pairs(references.result) do
           local outter_func = get_outer_function_info_from_c_file(ref)
-          if outter_func and outter_func.function_name == inner.name then
+          print("inner.name == " .. inner.name)
+          print("outter_func.function_name == " .. outter_func.function_name)
+          -- if outter_func and outter_func.function_name == inner.name then
+          -- if outter_func.function contains inner.name -> more robust than just a string cmp when what we found is an array that contains [] for instance
+          if string.find(outter_func.function_name, inner.name, 1, true) ~= nil then
             local wrong_uri = uri
             -- Update the cache with the correct information
             for _, child in pairs(self.cache.children) do
@@ -249,7 +303,7 @@ function Node:search(callback)
             -- create new child with correct info
             self:new_child(
               ref.uri,
-              outter_func.function_name,
+              inner.name, -- more robust than outter_func.function_name when we found an array
               ref.range.start.line + 1,
               ref.range.start.character, -- we don't do +1 to prevent telescope to shift by one when we jump to the location
               entry
@@ -448,6 +502,10 @@ local function quicksort_nodes(filepath_active_buffer, arr)
       return Path:new(node.filename):normalize(vim.uv.cwd()) .. string.format("%05d", node.lnum)
     end
   end
+
+  -- table.sort(arr, function(a, b)
+  --     return encode_node(a) < encode_node(b)
+  -- end)
 
   local pivot = arr[1]
   local left = {}
